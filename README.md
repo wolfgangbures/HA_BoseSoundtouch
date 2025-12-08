@@ -1,6 +1,7 @@
 # Bose SoundTouch custom integration
 
 This integration exposes individual Bose SoundTouch speakers as `media_player` entities without depending on the legacy HTTP platform. It re-implements the logic of the original Delphi tooling in Python so it can run natively inside Home Assistant.
+It was converted from Delphi code by GPT5.1-Codex
 
 ## Features
 
