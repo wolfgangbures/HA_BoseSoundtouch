@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Bose SoundTouch",
+        "description": "Enter the IP address or hostname of your speaker."
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the speaker. Double-check the host and try again."
+    }
+  }
+}

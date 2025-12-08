@@ -1,0 +1,11 @@
+{
+  "domain": "bose_soundtouch",
+  "name": "Bose SoundTouch",
+  "version": "0.1.0",
+  "documentation": "https://github.com/wolfgangbures/config",
+  "codeowners": ["@wolfgangbures"],
+  "dependencies": [],
+  "requirements": [],
+  "config_flow": true,
+  "iot_class": "local_polling"
+}

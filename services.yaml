@@ -1,0 +1,63 @@
+create_zone:
+  name: Create SoundTouch Zone
+  description: Create or replace the zone on the selected master speaker.
+  fields:
+    master:
+      name: Master speaker
+      description: Media player entity that should become the zone master.
+      example: media_player.bose_office_speaker
+      selector:
+        entity:
+          domain: media_player
+    members:
+      name: Member speakers
+      description: Media player entities that should join the zone.
+      example:
+        - media_player.bose_kitchen_speaker
+        - media_player.bose_salon_speaker
+      selector:
+        entity:
+          multiple: true
+          domain: media_player
+
+join_zone:
+  name: Add Speakers To Zone
+  description: Add one or more speakers to the existing zone led by the master.
+  fields:
+    master:
+      name: Zone master
+      description: Entity currently leading the SoundTouch zone.
+      example: media_player.bose_office_speaker
+      selector:
+        entity:
+          domain: media_player
+    members:
+      name: Members to add
+      description: Speakers that should join the master zone.
+      example:
+        - media_player.bose_bedroom_speaker
+      selector:
+        entity:
+          multiple: true
+          domain: media_player
+
+leave_zone:
+  name: Remove Speakers From Zone
+  description: Remove one or more members from the zone managed by the master speaker.
+  fields:
+    master:
+      name: Zone master
+      description: Entity that currently owns the SoundTouch zone.
+      example: media_player.bose_office_speaker
+      selector:
+        entity:
+          domain: media_player
+    members:
+      name: Members to remove
+      description: Speakers that should leave the zone.
+      example:
+        - media_player.bose_bathroom_speaker
+      selector:
+        entity:
+          multiple: true
+          domain: media_player
