@@ -2,5 +2,6 @@
   "name": "Bose SoundTouch",
   "content_in_root": false,
   "render_readme": true,
-  "domain": "bose_soundtouch"
+  "domain": "bose_soundtouch",
+  "icon": "custom_components/bose_soundtouch/icon.svg"
 }
