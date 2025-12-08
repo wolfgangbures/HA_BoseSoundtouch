@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e3a8a" />
+    </linearGradient>
+    <linearGradient id="speaker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f8fafc" />
+      <stop offset="100%" stop-color="#cbd5f5" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="72" fill="url(#bg)" />
+  <g fill="none" stroke="#94a3b8" stroke-width="10" opacity="0.4">
+    <path d="M380 156c48 48 48 152 0 200" stroke-linecap="round" />
+    <path d="M352 192c30 30 30 104 0 134" stroke-linecap="round" />
+  </g>
+  <g transform="translate(116 104)">
+    <rect x="0" y="0" width="280" height="304" rx="32" fill="url(#speaker)" stroke="#0f172a" stroke-width="8" />
+    <rect x="38" y="42" width="204" height="60" rx="16" fill="#0f172a" opacity="0.85" />
+    <circle cx="140" cy="212" r="70" fill="#0f172a" opacity="0.9" />
+    <circle cx="140" cy="212" r="44" fill="#1d4ed8" />
+    <circle cx="140" cy="212" r="16" fill="#f8fafc" />
+    <circle cx="60" cy="26" r="10" fill="#1d4ed8" />
+    <circle cx="100" cy="26" r="10" fill="#0f172a" opacity="0.5" />
+    <circle cx="180" cy="26" r="10" fill="#0f172a" opacity="0.5" />
+    <circle cx="220" cy="26" r="10" fill="#0f172a" opacity="0.5" />
+  </g>
+</svg>
