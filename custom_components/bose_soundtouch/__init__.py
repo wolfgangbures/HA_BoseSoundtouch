@@ -16,6 +16,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .client import SoundTouchClient, SoundTouchZoneMember
 from .const import DOMAIN, PLATFORMS
+from .utils import same_zone_members, speaker_in_zone
 from .coordinator import SoundTouchCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -133,17 +134,42 @@ async def _async_apply_zone_service(hass: HomeAssistant, data: dict, mode: str) 
         raise HomeAssistantError("The selected master is not currently leading a zone.")
 
     current_members = _filter_non_master_members(master_state.device_id, master_state.zone_members)
-    members_to_modify = [_entry_to_zone_member(entry) for entry in member_entries]
+    raw_members_to_modify = [_entry_to_zone_member(entry) for entry in member_entries]
+
+    if mode == "create":
+        members_to_modify = raw_members_to_modify
+    elif mode == "join":
+        members_to_modify = [
+            member
+            for member in raw_members_to_modify
+            if not speaker_in_zone(current_members, member.mac)
+        ]
+        if not members_to_modify:
+            _LOGGER.debug("Join zone request for %s had no new members", master_id)
+            return
+    elif mode == "leave":
+        members_to_modify = [
+            member
+            for member in raw_members_to_modify
+            if speaker_in_zone(current_members, member.mac)
+        ]
+        if not members_to_modify:
+            _LOGGER.debug("Leave zone request for %s ignored because members were absent", master_id)
+            return
+    else:
+        raise HomeAssistantError(f"Unsupported zone mode {mode}")
 
     if mode == "create":
         target_members = _unique_members(members_to_modify)
     elif mode == "join":
         target_members = _unique_members(current_members + members_to_modify)
-    elif mode == "leave":
-        remove_set = {member.mac.lower() for member in members_to_modify}
+    else:  # mode == "leave"
+        remove_set = {member.mac.lower() for member in members_to_modify if member.mac}
         target_members = [member for member in current_members if member.mac.lower() not in remove_set]
-    else:
-        raise HomeAssistantError(f"Unsupported zone mode {mode}")
+
+    if same_zone_members(current_members, target_members):
+        _LOGGER.debug("Zone %s request for %s produced no membership changes", mode, master_id)
+        return
 
     _LOGGER.debug(
         "Zone %s computed for master %s -> %s",
