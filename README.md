@@ -1,7 +1,6 @@
 # Bose SoundTouch custom integration
 
-This integration exposes individual Bose SoundTouch speakers as `media_player` entities without depending on the legacy HTTP platform. It re-implements the logic of the original Delphi tooling in Python so it can run natively inside Home Assistant.
-It was converted from Delphi code by GPT5.1-Codex
+This integration exposes individual Bose SoundTouch speakers as `media_player` entities without depending on the legacy HTTP platform. It is implemented natively for Home Assistant using an asynchronous HTTP client so it can run entirely inside the core process.
 
 ## Features
 
@@ -20,7 +19,7 @@ It was converted from Delphi code by GPT5.1-Codex
 ## Usage tips
 
 - The created `media_player` entity exposes power, volume and source controls directly in the UI.
-- Source selection relies on the SoundTouch source identifiers (for example `TUNEIN`, `BLUETOOTH`, `AUX`). The special `hifi` shortcut from the Delphi tool is preserved.
+- Source selection relies on the SoundTouch source identifiers (for example `TUNEIN`, `BLUETOOTH`, `AUX`). Provide the identifiers exactly as they appear in the Bose app or in the `/sources` response for reliable matching.
 - Zone automation is handled by three new services available under the `bose_soundtouch` domain:
 	- `create_zone`: define a master and the exact list of members that should stay in the group.
 	- `join_zone`: append one or more speakers to the master’s current zone without disturbing existing members.

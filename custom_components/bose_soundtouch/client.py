@@ -165,10 +165,6 @@ class SoundTouchClient:
         await self._select_source_fallback(source)
 
     async def async_select_source_item(self, source: SoundTouchSource) -> None:
-        normalized_name = source.name.lower() if source.name else ""
-        if normalized_name == "hifi" and not source.location:
-            await self._select_source_fallback("hifi")
-            return
         root = ET.Element("ContentItem")
         if source.source:
             root.set("source", source.source)
@@ -187,23 +183,18 @@ class SoundTouchClient:
         await self._request("post", "/select", root)
 
     async def _select_source_fallback(self, source: str) -> None:
-        normalized = source.lower()
-        if normalized == "hifi":
-            xml_payload = (
-                '<ContentItem source="LOCAL_INTERNET_RADIO" type="stationurl" '
-                'location="https://content.api.bose.io/core02/svc-bmx-adapter-orion/prod/orion/station?data=eyJuYW1lIjoiSGlmaSAiLCJpbWFnZVVybCI6IiIsInN0cmVhbVVybCI6Imh0dHA6Ly8xMC4zMC4xLjI4OjU5MDEvc3RyZWFtL3N3eWgubXAzIn0%3D" '
-                'sourceAccount="" isPresetable="true">'
-                "<itemName>Hifi</itemName><containerArt /></ContentItem>"
-            )
-            payload = ET.fromstring(xml_payload)
+        raw_value = (source or "").strip()
+        payload = ET.Element("ContentItem")
+        if ":" in raw_value:
+            source_name, source_account = [part.strip() for part in raw_value.split(":", 1)]
         else:
-            payload = ET.Element("ContentItem")
-            if normalized == "bluetooth":
-                payload.set("source", "BLUETOOTH")
-                payload.set("sourceAccount", "")
-            else:
-                payload.set("source", source.upper())
-                payload.set("sourceAccount", source.upper())
+            source_name, source_account = raw_value, ""
+        normalized_source = source_name.upper() if source_name else "AUX"
+        payload.set("source", normalized_source)
+        if normalized_source == "BLUETOOTH" and not source_account:
+            payload.set("sourceAccount", "")
+        elif source_account:
+            payload.set("sourceAccount", source_account)
         await self._request("post", "/select", payload)
 
     async def async_set_zone(self, members: list[SoundTouchZoneMember]) -> None:
