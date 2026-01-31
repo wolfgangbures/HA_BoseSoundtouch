@@ -14,8 +14,8 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .client import SoundTouchClient, SoundTouchZoneMember
-from .const import DOMAIN, PLATFORMS
+from .client import SoundTouchClient, SoundTouchError, SoundTouchZoneMember
+from .const import DATA_LAST_SOURCE, DOMAIN, PLATFORMS
 from .utils import same_zone_members, speaker_in_zone
 from .coordinator import SoundTouchCoordinator
 
@@ -171,6 +171,10 @@ async def _async_apply_zone_service(hass: HomeAssistant, data: dict, mode: str) 
         _LOGGER.debug("Zone %s request for %s produced no membership changes", mode, master_id)
         return
 
+    desired_source = "AUX"
+    if mode == "create":
+        desired_source = _get_last_source(hass, master_state.device_id) or desired_source
+
     _LOGGER.debug(
         "Zone %s computed for master %s -> %s",
         mode,
@@ -180,8 +184,40 @@ async def _async_apply_zone_service(hass: HomeAssistant, data: dict, mode: str) 
 
     await master_client.async_set_zone(target_members)
 
+    if mode == "create":
+        try:
+            await master_client.async_select_source(desired_source)
+            _set_last_source(hass, master_state.device_id, desired_source)
+        except SoundTouchError as err:
+            _LOGGER.debug(
+                "Unable to select source %s after zone create for %s: %s",
+                desired_source,
+                master_id,
+                err,
+            )
+
     refresh_targets = [master_entry, *member_entries]
     await _async_refresh(refresh_targets)
+
+
+def _get_last_source(hass: HomeAssistant, device_id: str | None) -> str | None:
+    if not device_id:
+        return None
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    cache: dict[str, str] = domain_data.setdefault(DATA_LAST_SOURCE, {})
+    cached = (cache.get(device_id.lower()) or "").strip()
+    return cached or None
+
+
+def _set_last_source(hass: HomeAssistant, device_id: str | None, source: str) -> None:
+    if not device_id:
+        return
+    normalized = (source or "").strip()
+    if not normalized:
+        return
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    cache: dict[str, str] = domain_data.setdefault(DATA_LAST_SOURCE, {})
+    cache[device_id.lower()] = normalized
 
 
 def _get_entry_data_from_entity(hass: HomeAssistant, entity_id: str) -> dict:

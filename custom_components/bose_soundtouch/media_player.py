@@ -15,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .client import SoundTouchError, SoundTouchSource, SoundTouchState
-from .const import DATA_MAC_LOOKUP, DATA_ZONE_CACHE, DOMAIN
+from .const import DATA_LAST_SOURCE, DATA_MAC_LOOKUP, DATA_ZONE_CACHE, DOMAIN
 from .coordinator import SoundTouchCoordinator
 
 SUPPORTED_FEATURES = (
@@ -63,7 +63,25 @@ class SoundTouchMediaPlayer(CoordinatorEntity[SoundTouchCoordinator], MediaPlaye
     def _handle_coordinator_update(self) -> None:
         self._ensure_mac_registered()
         self._cache_zone_members()
+        self._cache_last_source()
         super()._handle_coordinator_update()
+
+    def _source_cache(self) -> dict[str, str]:
+        if not self.hass:
+            return {}
+        domain_data = self.hass.data.setdefault(DOMAIN, {})
+        return domain_data.setdefault(DATA_LAST_SOURCE, {})
+
+    def _cache_last_source(self) -> None:
+        if not self.hass:
+            return
+        data = self.coordinator.data
+        if not data or not data.device_id:
+            return
+        candidate = (data.source_account or data.source or "").strip()
+        if not candidate:
+            return
+        self._source_cache()[data.device_id.lower()] = candidate
 
     def _ensure_mac_registered(self) -> None:
         if not self.hass:
@@ -277,4 +295,8 @@ class SoundTouchMediaPlayer(CoordinatorEntity[SoundTouchCoordinator], MediaPlaye
                     break
         if not handled:
             await self.coordinator.client.async_select_source(source)
+
+        data = self.coordinator.data
+        if self.hass and data and data.device_id:
+            self._source_cache()[data.device_id.lower()] = source.strip() or source
         await self.coordinator.async_request_refresh()
