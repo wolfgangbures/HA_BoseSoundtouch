@@ -10,3 +10,4 @@ DEFAULT_PORT = 8090
 DEFAULT_POLL_INTERVAL = 15
 DATA_MAC_LOOKUP = "mac_entity_lookup"
 DATA_ZONE_CACHE = "zone_members_cache"
+DATA_LAST_SOURCE = "last_source_cache"
