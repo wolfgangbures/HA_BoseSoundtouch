@@ -137,6 +137,14 @@ async def _async_apply_zone_service(hass: HomeAssistant, data: dict, mode: str) 
     raw_members_to_modify = [_entry_to_zone_member(entry) for entry in member_entries]
 
     if mode == "create":
+        # For create, if the current zone already matches the requested members (including master), skip recreation
+        requested_macs = {member.mac.lower() for member in raw_members_to_modify if member.mac}
+        current_macs = {member.mac.lower() for member in current_members}
+        master_mac = (master_state.device_id or "").lower()
+        # The current zone should include the master and all requested members
+        if requested_macs | {master_mac} == current_macs | {master_mac} and len(current_macs) == len(requested_macs):
+            _LOGGER.debug("Create zone request for %s ignored because zone already matches requested members", master_id)
+            return
         members_to_modify = raw_members_to_modify
     elif mode == "join":
         members_to_modify = [
