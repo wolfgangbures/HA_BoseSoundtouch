@@ -41,6 +41,6 @@
 ## GitHub
 - Always split branches by feature/fix for PRs; avoid working directly on `main`.
 - Write clear, descriptive commit messages; reference related issues/PRs when applicable.
-- Merge PRs after the changes immediately.
+- Create PRs with me as approver.
 - Tag releases in GitHub matching the version in `manifest.json`.
 - increment the version in `manifest.json` for every PR that changes functionality.
