@@ -249,6 +249,7 @@ class SoundTouchClient:
     async def _async_get_now_playing(self) -> dict[str, Any]:
         node = await self._request("get", "/now_playing")
         if node is None:
+            _LOGGER.debug("%s: now_playing response was empty", self._host)
             return {}
         content_item = node.find("ContentItem")
         source: str | None = None
@@ -261,6 +262,13 @@ class SoundTouchClient:
             )
             source_account = content_item.get("sourceAccount") or content_item.findtext("sourceAccount")
         status = node.findtext("playStatus") or node.findtext("status")
+        if not status:
+            _LOGGER.debug(
+                "%s: now_playing missing status (source=%s source_account=%s)",
+                self._host,
+                source,
+                source_account,
+            )
         return {"source": source, "source_account": source_account, "status": status}
 
     async def async_get_sources(self) -> list[SoundTouchSource]:
