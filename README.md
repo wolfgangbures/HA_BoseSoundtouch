@@ -1,3 +1,5 @@
+![Bose SoundTouch](logo.png)
+
 # Bose SoundTouch custom integration
 
 This integration exposes individual Bose SoundTouch speakers as `media_player` entities without depending on the legacy HTTP platform. It is implemented natively for Home Assistant using an asynchronous HTTP client so it can run entirely inside the core process.
