@@ -3,5 +3,5 @@
   "content_in_root": false,
   "render_readme": true,
   "domain": "bose_soundtouch",
-  "icon": "custom_components/bose_soundtouch/icon.svg"
+  "icon": "logo.png"
 }
