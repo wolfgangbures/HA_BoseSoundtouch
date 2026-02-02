@@ -1,4 +1,4 @@
-<img src="logo.png" alt="Bose SoundTouch" width="25%" height="25%" />
+<img src="https://raw.githubusercontent.com/wolfgangbures/HA_BoseSoundtouch/main/logo.png" alt="Bose SoundTouch" width="25%" height="25%" />
 
 # Bose SoundTouch custom integration
 
