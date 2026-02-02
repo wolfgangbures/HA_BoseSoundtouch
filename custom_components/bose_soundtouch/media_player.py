@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.components.media_player import MediaPlayerEntity
@@ -17,6 +18,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .client import SoundTouchError, SoundTouchSource, SoundTouchState
 from .const import DATA_LAST_SOURCE, DATA_MAC_LOOKUP, DATA_ZONE_CACHE, DOMAIN
 from .coordinator import SoundTouchCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 SUPPORTED_FEATURES = (
     MediaPlayerEntityFeature.TURN_ON
@@ -46,6 +49,7 @@ class SoundTouchMediaPlayer(CoordinatorEntity[SoundTouchCoordinator], MediaPlaye
         super().__init__(coordinator)
         self._entry = entry
         self._sources: list[SoundTouchSource] | None = None
+        self._last_status: str | None = None
         self._attr_unique_id = entry.unique_id or (
             coordinator.data.device_id if coordinator.data else entry.entry_id
         )
@@ -61,6 +65,25 @@ class SoundTouchMediaPlayer(CoordinatorEntity[SoundTouchCoordinator], MediaPlaye
         self._cache_zone_members()
 
     def _handle_coordinator_update(self) -> None:
+        data = self.coordinator.data
+        if data:
+            self._last_status = data.status
+            _LOGGER.debug(
+                "State update for %s: status=%s source=%s source_account=%s volume=%s muted=%s",
+                data.device_id,
+                data.status,
+                data.source,
+                data.source_account,
+                data.volume,
+                data.is_muted,
+            )
+            if not data.status:
+                _LOGGER.debug(
+                    "No play status reported for %s (source=%s source_account=%s)",
+                    data.device_id,
+                    data.source,
+                    data.source_account,
+                )
         self._ensure_mac_registered()
         self._cache_zone_members()
         self._cache_last_source()
@@ -180,6 +203,8 @@ class SoundTouchMediaPlayer(CoordinatorEntity[SoundTouchCoordinator], MediaPlaye
     def state(self) -> MediaPlayerState | None:
         state = self.coordinator.data.status if self.coordinator.data else None
         if not state:
+            if self.coordinator.data:
+                return MediaPlayerState.IDLE
             return None
         normalized = state.lower()
         if normalized.startswith("play"):
