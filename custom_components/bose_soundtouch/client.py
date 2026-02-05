@@ -326,6 +326,8 @@ class SoundTouchClient:
             async with self._session.request(method, url, data=data, headers=headers, timeout=10) as resp:
                 resp.raise_for_status()
                 text = await resp.text()
+        except asyncio.TimeoutError as err:
+            raise SoundTouchError(f"Request to {url} timed out") from err
         except ClientError as err:
             raise SoundTouchError(f"Request to {url} failed: {err}") from err
         if not text.strip():
