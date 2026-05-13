@@ -22,9 +22,22 @@ This integration exposes individual Bose SoundTouch speakers as `media_player` e
 
 - The created `media_player` entity exposes power, volume and source controls directly in the UI.
 - Source selection relies on the SoundTouch source identifiers (for example `TUNEIN`, `BLUETOOTH`, `AUX`). Provide the identifiers exactly as they appear in the Bose app or in the `/sources` response for reliable matching.
+- The integration only attempts `/select` for sources that the speaker currently reports as selectable. If a source is known but currently unavailable, the command is skipped and only a warning is logged.
 - Zone automation is handled by three new services available under the `bose_soundtouch` domain:
 	- `create_zone`: define a master and the exact list of members that should stay in the group.
 	- `join_zone`: append one or more speakers to the master’s current zone without disturbing existing members.
 	- `leave_zone`: remove one or more speakers from the master’s zone.
 	Each service expects entity IDs from this integration (`media_player.bose_*`).
 - Every entity exposes attributes with the active IP address, MAC/device ID, and a JSON-style list of current zone members so automations can react to topology changes.
+
+## Changelog
+
+### 1.0.7b1
+
+- Added longer timeout handling and a single retry for `/select` requests because newer Bose SoundTouch firmware can stall longer on local source switching.
+- Prevented transient SoundTouch communication errors from bubbling out of entity service calls and breaking Home Assistant scripts.
+- Added source availability pre-validation so known but unavailable inputs are skipped before `/select` is attempted.
+- Built for beta validation of Bose cloud-deprecation related source-selection regressions.
+
+For GitHub prerelease notes, see `RELEASE_NOTES_1.0.7b1.md`.
+

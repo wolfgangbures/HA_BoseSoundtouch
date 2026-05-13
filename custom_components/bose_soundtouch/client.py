@@ -35,6 +35,7 @@ class SoundTouchSource:
     name: str
     source: str
     source_account: str | None
+    status: str | None = None
     content_type: str | None = None
     location: str | None = None
     is_presetable: bool = False
@@ -87,6 +88,8 @@ class SoundTouchClient:
         self._name: str | None = None
         self._device_type: str | None = None
         self._control_ip: str = host
+        self._request_timeout_default = 10
+        self._request_timeout_select = 20
 
     @property
     def host(self) -> str:
@@ -155,11 +158,16 @@ class SoundTouchClient:
     async def async_select_source(self, source: str) -> None:
         normalized = source.strip().lower()
         try:
-            candidates = await self.async_get_sources()
+            candidates = await self.async_get_sources(include_unavailable=True)
         except SoundTouchError:
             candidates = []
         for candidate in candidates:
             if candidate.matches(normalized):
+                if candidate.status and candidate.status not in {"READY", "PLAYING"}:
+                    label = candidate.name or candidate.source_account or candidate.source or source
+                    raise SoundTouchError(
+                        f"Source '{label}' is currently unavailable (status={candidate.status})"
+                    )
                 await self.async_select_source_item(candidate)
                 return
         await self._select_source_fallback(source)
@@ -271,7 +279,7 @@ class SoundTouchClient:
             )
         return {"source": source, "source_account": source_account, "status": status}
 
-    async def async_get_sources(self) -> list[SoundTouchSource]:
+    async def async_get_sources(self, include_unavailable: bool = False) -> list[SoundTouchSource]:
         node = await self._request("get", "/sources")
         if node is None:
             return []
@@ -279,7 +287,7 @@ class SoundTouchClient:
         for child in list(node):
             attrs = child.attrib
             status = (attrs.get("status") or "").upper()
-            if status and status not in {"READY", "PLAYING"}:
+            if not include_unavailable and status and status not in {"READY", "PLAYING"}:
                 continue
             name = (child.text or attrs.get("itemName") or attrs.get("sourceAccount") or attrs.get("source") or "").strip()
             source = (attrs.get("source") or attrs.get("sourceID") or "").upper()
@@ -292,6 +300,7 @@ class SoundTouchClient:
                     name=name or source_account or source,
                     source=source,
                     source_account=source_account,
+                    status=status or None,
                     content_type=content_type,
                     location=location,
                     is_presetable=is_presetable,
@@ -322,14 +331,56 @@ class SoundTouchClient:
         if payload is not None:
             data = ET.tostring(payload, encoding="utf-8")
             headers = {"Content-Type": "application/xml"}
-        try:
-            async with self._session.request(method, url, data=data, headers=headers, timeout=10) as resp:
-                resp.raise_for_status()
-                text = await resp.text()
-        except asyncio.TimeoutError as err:
-            raise SoundTouchError(f"Request to {url} timed out") from err
-        except ClientError as err:
-            raise SoundTouchError(f"Request to {url} failed: {err}") from err
+        timeout = self._request_timeout_select if path == "/select" else self._request_timeout_default
+        retries = 1 if path == "/select" else 0
+        last_error: Exception | None = None
+        text = ""
+
+        for attempt in range(retries + 1):
+            try:
+                async with self._session.request(
+                    method,
+                    url,
+                    data=data,
+                    headers=headers,
+                    timeout=timeout,
+                ) as resp:
+                    resp.raise_for_status()
+                    text = await resp.text()
+                break
+            except asyncio.TimeoutError as err:
+                last_error = err
+                if attempt < retries:
+                    _LOGGER.debug(
+                        "%s %s timed out after %ss (attempt %s/%s), retrying",
+                        method.upper(),
+                        url,
+                        timeout,
+                        attempt + 1,
+                        retries + 1,
+                    )
+                    await asyncio.sleep(0.4)
+                    continue
+                raise SoundTouchError(
+                    f"Request {method.upper()} {url} timed out after {timeout}s"
+                ) from err
+            except ClientError as err:
+                last_error = err
+                if attempt < retries:
+                    _LOGGER.debug(
+                        "%s %s failed with client error on attempt %s/%s: %s",
+                        method.upper(),
+                        url,
+                        attempt + 1,
+                        retries + 1,
+                        err,
+                    )
+                    await asyncio.sleep(0.4)
+                    continue
+                raise SoundTouchError(f"Request {method.upper()} {url} failed: {err}") from err
+
+        if last_error and not text:
+            raise SoundTouchError(f"Request {method.upper()} {url} failed: {last_error}")
         if not text.strip():
             return None
         try:
