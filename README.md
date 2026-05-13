@@ -32,6 +32,15 @@ This integration exposes individual Bose SoundTouch speakers as `media_player` e
 
 ## Changelog
 
+### 1.0.7
+
+- Promoted the source-selection resilience fixes from `1.0.7b1` to stable.
+- Kept `/select` reliability improvements: longer timeout and one retry for slower speaker responses.
+- Kept command-path error containment so transient communication issues do not crash Home Assistant scripts.
+- Kept source availability pre-validation against `/sources` before attempting `/select`.
+
+For stable release notes, see `RELEASE_NOTES_1.0.7.md`.
+
 ### 1.0.7b1
 
 - Added longer timeout handling and a single retry for `/select` requests because newer Bose SoundTouch firmware can stall longer on local source switching.
@@ -40,4 +49,5 @@ This integration exposes individual Bose SoundTouch speakers as `media_player` e
 - Built for beta validation of Bose cloud-deprecation related source-selection regressions.
 
 For GitHub prerelease notes, see `RELEASE_NOTES_1.0.7b1.md`.
+
 
