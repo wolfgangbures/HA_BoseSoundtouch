@@ -295,10 +295,10 @@ class SoundTouchMediaPlayer(CoordinatorEntity[SoundTouchCoordinator], MediaPlaye
         }
 
     async def async_turn_on(self) -> None:
-        await self._async_power_cycle()
+        await self._async_safe_command("power on", self._async_power_cycle)
 
     async def async_turn_off(self) -> None:
-        await self._async_power_cycle()
+        await self._async_safe_command("power off", self._async_power_cycle)
 
     async def _async_power_cycle(self) -> None:
         await self.coordinator.client.async_press_key("POWER", "press")
@@ -307,21 +307,40 @@ class SoundTouchMediaPlayer(CoordinatorEntity[SoundTouchCoordinator], MediaPlaye
 
     async def async_set_volume_level(self, volume: float) -> None:
         volume_value = max(0, min(100, round(volume * 100)))
-        await self.coordinator.client.async_set_volume(volume_value)
-        await self.coordinator.async_request_refresh()
+        await self._async_safe_command(
+            f"set volume to {volume_value}",
+            self.coordinator.client.async_set_volume,
+            volume_value,
+        )
 
     async def async_select_source(self, source: str) -> None:
-        handled = False
-        if self._sources:
-            for item in self._sources:
-                if item.name.lower() == source.lower():
-                    await self.coordinator.client.async_select_source_item(item)
-                    handled = True
-                    break
-        if not handled:
-            await self.coordinator.client.async_select_source(source)
+        async def _do_select() -> None:
+            handled = False
+            if self._sources:
+                for item in self._sources:
+                    if item.name.lower() == source.lower():
+                        await self.coordinator.client.async_select_source_item(item)
+                        handled = True
+                        break
+            if not handled:
+                await self.coordinator.client.async_select_source(source)
 
-        data = self.coordinator.data
-        if self.hass and data and data.device_id:
-            self._source_cache()[data.device_id.lower()] = source.strip() or source
-        await self.coordinator.async_request_refresh()
+        if await self._async_safe_command(f"select source '{source}'", _do_select):
+            data = self.coordinator.data
+            if self.hass and data and data.device_id:
+                self._source_cache()[data.device_id.lower()] = source.strip() or source
+
+    async def _async_safe_command(self, action: str, command, *args) -> bool:
+        try:
+            await command(*args)
+            return True
+        except SoundTouchError as err:
+            _LOGGER.warning(
+                "Ignoring SoundTouch communication error while trying to %s on %s: %s",
+                action,
+                self.entity_id or self._fallback_name,
+                err,
+            )
+            return False
+        finally:
+            await self.coordinator.async_request_refresh()
