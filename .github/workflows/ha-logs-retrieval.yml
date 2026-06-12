@@ -1,0 +1,15 @@
+name: Retrieve HA Logs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  retrieve:
+    uses: wolfgangbures/HA1180/.github/workflows/ha-logs-retrieval.yml@main
+    with:
+      ha_base_url: ${{ vars.HA_BASE_URL }}
+      log_endpoint: /api/error_log
+      output_filename: ha-logs.txt
+      timeout_seconds: 30
+    secrets:
+      ha_token: ${{ secrets.HA_TOKEN }}

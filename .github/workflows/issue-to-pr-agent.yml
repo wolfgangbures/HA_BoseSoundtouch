@@ -1,0 +1,74 @@
+name: Issue → AI Agent PR
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
+jobs:
+  create-pr-from-issue:
+    if: ${{ github.event.issue.pull_request == null }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Run Copilot coding agent from issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const problemTitle = `Implement fix for #${issue.number}: ${issue.title}`;
+            const problemStatement = `
+            A new GitHub issue was opened and should be analyzed and implemented.
+
+            Repository: ${owner}/${repo}
+            Issue: #${issue.number}
+            Title: ${issue.title}
+            Author: ${issue.user.login}
+            URL: ${issue.html_url}
+
+            Issue body:
+            ${issue.body || "(no description provided)"}
+            
+            Instructions:
+            1. Analyze the issue and inspect relevant code paths.
+            2. Retrieve live Home Assistant logs from the HA1180 live instance with the ha-logs-retrieval.yml workflow
+               - Use ha-logs-retrieval.yml from this repository.
+               - download artifact ha-logs
+               - Summarize key errors/warnings and probable root cause from those logs.
+            3. Propose and implement a minimal, safe fix based on code + live log evidence.
+            4. Add or update tests where appropriate.
+            5. Open a pull request referencing #${issue.number}.
+            6. In the PR description, include:
+               - Root cause (including log evidence from HA1180 ha-logs retrieval)
+               - Implementation summary
+               - Test coverage
+               - Risks / follow-ups
+
+            await github.request("POST /repos/{owner}/{repo}/copilot/tasks", {
+              owner,
+              repo,
+              problem_title: problemTitle,
+              problem_statement: problemStatement,
+              create_pull_request: true
+            });
+
+      - name: Comment on issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: "🤖 I started an AI coding task to analyze this issue and prepare a suggested PR."
+            });
