@@ -2,7 +2,7 @@
   "domain": "bose_soundtouch",
   "name": "Bose SoundTouch",
   "icon": "mdi:speaker",
-  "version": "1.0.7",
+  "version": "1.0.8b1",
   "documentation": "https://github.com/wolfgangbures/config",
   "codeowners": ["@wolfgangbures"],
   "dependencies": [],

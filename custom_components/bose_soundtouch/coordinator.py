@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 import logging
+
+from aiohttp import ClientError
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -30,5 +33,7 @@ class SoundTouchCoordinator(DataUpdateCoordinator[SoundTouchState]):
     async def _async_update_data(self) -> SoundTouchState:
         try:
             return await self.client.async_get_state()
+        except (asyncio.TimeoutError, ClientError, OSError) as err:
+            raise UpdateFailed(f"Transport error while polling {self.client.host}: {err}") from err
         except SoundTouchError as err:
             raise UpdateFailed(err) from err
