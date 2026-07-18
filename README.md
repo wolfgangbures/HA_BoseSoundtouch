@@ -37,6 +37,7 @@ This integration exposes individual Bose SoundTouch speakers as `media_player` e
 - Promoted the availability-handling fixes from `1.0.8b1` to stable.
 - Keeps coordinator-level transport failure handling so polling errors mark entities unavailable instead of leaving stale state visible.
 - Keeps DNS, socket, timeout, and HTTP transport failures mapped to `UpdateFailed` during polling so Home Assistant availability drops correctly.
+- Fixes the integration branding asset layout so icon and logo files ship from the supported `brand/` directory.
 
 For stable release notes, see `RELEASE_NOTES_1.0.8.md`.
 

@@ -7,6 +7,7 @@ Stable release promoting the 1.0.8b1 availability-handling fixes for unreachable
 - Keeps coordinator-level transport failure handling so polling errors become `UpdateFailed` instead of leaving the last successful state in place.
 - Causes Home Assistant entities to go unavailable on DNS, socket, timeout, and HTTP transport failures during refresh.
 - Preserves the earlier source-selection resilience changes while improving offline-speaker behavior.
+- Corrects the package branding layout so icon assets are provided from the supported `custom_components/bose_soundtouch/brand/` directory.
 
 ## Scope
 
