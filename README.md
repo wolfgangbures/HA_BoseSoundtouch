@@ -32,6 +32,14 @@ This integration exposes individual Bose SoundTouch speakers as `media_player` e
 
 ## Changelog
 
+### 1.0.9
+
+- Promoted the playback-state clarity and grouping metadata improvements from `1.0.9b1` to stable.
+- Keeps zero-volume playback refinement so speakers do not appear actively playing when effectively silent.
+- Keeps explicit grouping attributes and effective state detail attributes for more reliable automations.
+
+For stable release notes, see `RELEASE_NOTES_1.0.9.md`.
+
 ### 1.0.9b1
 
 - Adds state refinement for zero-volume playback so `Playing` with volume `0` (or muted) is surfaced as a ready-like idle state in Home Assistant.
