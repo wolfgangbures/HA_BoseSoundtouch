@@ -190,6 +190,33 @@ class SoundTouchMediaPlayer(CoordinatorEntity[SoundTouchCoordinator], MediaPlaye
                 entities.append(entity_id)
         return entities
 
+    def _group_role(self, data: SoundTouchState) -> str:
+        members = self._get_zone_members()
+        if len(members) <= 1:
+            return "standalone"
+        if data.is_master:
+            return "master"
+        return "member"
+
+    def _effective_state(self, data: SoundTouchState) -> tuple[MediaPlayerState, str]:
+        state = data.status or ""
+        normalized = state.lower()
+        role = self._group_role(data)
+
+        if normalized.startswith("play"):
+            if data.volume == 0 or data.is_muted:
+                return MediaPlayerState.IDLE, f"ready_zero_volume_{role}"
+            return MediaPlayerState.PLAYING, f"playing_{role}"
+        if "pause" in normalized:
+            return MediaPlayerState.PAUSED, f"paused_{role}"
+        if normalized in {"standby", "stop_state", "inactive"}:
+            return MediaPlayerState.OFF, f"off_{role}"
+        if "buffer" in normalized:
+            return MediaPlayerState.BUFFERING, f"buffering_{role}"
+        if normalized in {"ready", "none"}:
+            return MediaPlayerState.IDLE, f"ready_{role}"
+        return MediaPlayerState.IDLE, f"idle_{role}"
+
     @property
     def available(self) -> bool:
         return self.coordinator.last_update_success
@@ -201,21 +228,10 @@ class SoundTouchMediaPlayer(CoordinatorEntity[SoundTouchCoordinator], MediaPlaye
 
     @property
     def state(self) -> MediaPlayerState | None:
-        state = self.coordinator.data.status if self.coordinator.data else None
-        if not state:
-            if self.coordinator.data:
-                return MediaPlayerState.IDLE
+        data = self.coordinator.data
+        if not data:
             return None
-        normalized = state.lower()
-        if normalized.startswith("play"):
-            return MediaPlayerState.PLAYING
-        if "pause" in normalized:
-            return MediaPlayerState.PAUSED
-        if normalized in {"standby", "stop_state", "inactive"}:
-            return MediaPlayerState.OFF
-        if "buffer" in normalized:
-            return MediaPlayerState.BUFFERING
-        return MediaPlayerState.IDLE
+        return self._effective_state(data)[0]
 
     @property
     def volume_level(self) -> float | None:
@@ -277,6 +293,13 @@ class SoundTouchMediaPlayer(CoordinatorEntity[SoundTouchCoordinator], MediaPlaye
             }
         if group_entities:
             attributes["soundtouch_group"] = group_entities
+
+        role = self._group_role(data)
+        effective_state, effective_state_detail = self._effective_state(data)
+        attributes["soundtouch_group_role"] = role
+        attributes["soundtouch_grouped"] = role != "standalone"
+        attributes["soundtouch_effective_state"] = effective_state.value
+        attributes["soundtouch_effective_state_detail"] = effective_state_detail
         return attributes
 
     @property
