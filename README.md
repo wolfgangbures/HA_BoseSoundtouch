@@ -32,6 +32,15 @@ This integration exposes individual Bose SoundTouch speakers as `media_player` e
 
 ## Changelog
 
+### 1.0.10
+
+- Promoted the sensor additions from `1.0.10b1` to stable.
+- Adds dedicated `sensor` entities for SoundTouch volume, input, and zone state to enable Recorder history and graphs.
+- Sensors reuse coordinator data with no additional polling traffic.
+- Zone sensor includes `is_master`, `zone_master_mac`, and `zone_size` attributes.
+
+For stable release notes, see `RELEASE_NOTES_1.0.10.md`.
+
 ### 1.0.10b1
 
 - Adds dedicated Home Assistant `sensor` entities for SoundTouch volume, input, and zone state to enable Recorder history/graphs.
