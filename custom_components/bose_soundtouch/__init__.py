@@ -188,6 +188,7 @@ async def _async_apply_zone_service(hass: HomeAssistant, data: dict, mode: str) 
         [f"{member.mac}@{member.ip}" for member in target_members],
     )
 
+    master_coordinator.remember_desired_zone(target_members)
     await master_client.async_set_zone(target_members)
 
     if mode == "create":

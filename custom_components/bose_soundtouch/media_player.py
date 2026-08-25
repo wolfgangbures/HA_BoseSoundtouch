@@ -330,6 +330,7 @@ class SoundTouchMediaPlayer(CoordinatorEntity[SoundTouchCoordinator], MediaPlaye
 
     async def async_set_volume_level(self, volume: float) -> None:
         volume_value = max(0, min(100, round(volume * 100)))
+        self.coordinator.remember_desired_volume(volume_value)
         await self._async_safe_command(
             f"set volume to {volume_value}",
             self.coordinator.client.async_set_volume,
