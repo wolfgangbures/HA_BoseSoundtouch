@@ -65,6 +65,21 @@ class FakeCoordinatorEntity:
         self.coordinator = coordinator
 
 
+class FakeEntity:
+    def __init__(self):
+        self.removers = []
+        self.state_writes = 0
+
+    async def async_added_to_hass(self):
+        pass
+
+    def async_on_remove(self, remove):
+        self.removers.append(remove)
+
+    def async_write_ha_state(self):
+        self.state_writes += 1
+
+
 def load_integration():
     """Isolate HA substitutes to imports, without polluting other test suites."""
 
@@ -80,13 +95,15 @@ def load_integration():
         "homeassistant.helpers.entity_platform",
         "homeassistant.components", "homeassistant.components.media_player",
         "homeassistant.components.media_player.const",
+        "homeassistant.helpers.entity", "homeassistant.components.switch",
+        "homeassistant.components.number",
     ):
         modules[name] = ModuleType(name)
     modules["homeassistant.core"].HomeAssistant = object
     modules["homeassistant.core"].ServiceCall = object
     modules["homeassistant.core"].callback = lambda func: func
     modules["homeassistant.const"].Platform = SimpleNamespace(
-        MEDIA_PLAYER="media_player", SENSOR="sensor",
+        MEDIA_PLAYER="media_player", SENSOR="sensor", SWITCH="switch", NUMBER="number",
     )
     entries = modules["homeassistant.config_entries"]
     entries.ConfigEntry = object
@@ -106,6 +123,11 @@ def load_integration():
     helpers.config_validation = modules["homeassistant.helpers.config_validation"]
     helpers.entity_registry = modules["homeassistant.helpers.entity_registry"]
     modules["homeassistant.helpers.entity_platform"].AddEntitiesCallback = object
+    modules["homeassistant.helpers.entity"].Entity = FakeEntity
+    modules["homeassistant.helpers.entity"].EntityCategory = SimpleNamespace(CONFIG="config")
+    modules["homeassistant.components.switch"].SwitchEntity = type("SwitchEntity", (), {})
+    modules["homeassistant.components.number"].NumberEntity = type("NumberEntity", (), {})
+    modules["homeassistant.components.number"].NumberMode = SimpleNamespace(BOX="box")
     modules["homeassistant.components.media_player"].MediaPlayerEntity = type(
         "MediaPlayerEntity", (), {},
     )
@@ -128,6 +150,9 @@ def load_integration():
     with patch.dict(sys.modules, modules):
         spec.loader.exec_module(package)
         from _bose_volume_tests import client, config_flow, coordinator, media_player
+        from _bose_volume_tests import number, switch
+        package.number_platform = number
+        package.switch_platform = switch
     return package, client, config_flow, coordinator, media_player, update.UpdateFailed
 
 
@@ -433,45 +458,20 @@ class VolumeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FlowTests(unittest.IsolatedAsyncioTestCase):
-    async def test_options_defaults_and_validation(self):
-        flow = flows.BoseSoundTouchOptionsFlow()
-        flow.config_entry = SimpleNamespace(options={})
-        form = await flow.async_step_init()
-        values = form["data_schema"]({})
-        self.assertEqual(values, {
-            "enable_volume_fade": False, "volume_fade_duration": 1000,
-        })
-        with self.assertRaises(vol.Invalid):
-            form["data_schema"]({"volume_fade_duration": -1})
-        with self.assertRaises(vol.Invalid):
-            form["data_schema"]({"volume_fade_duration": "invalid"})
-        with self.assertRaises(vol.Invalid):
-            form["data_schema"]({"enable_volume_fade": "true"})
-        values = form["data_schema"]({
-            "enable_volume_fade": True, "volume_fade_duration": 2500,
-        })
-        self.assertEqual((await flow.async_step_init(values))["data"], values)
-
-    async def test_options_keep_existing_values(self):
-        flow = flows.BoseSoundTouchOptionsFlow()
-        options = {"enable_volume_fade": True, "volume_fade_duration": 3500}
-        flow.config_entry = SimpleNamespace(options=options)
-        form = await flow.async_step_init()
-        self.assertEqual(form["data_schema"]({}), options)
-
-    async def test_onboarding_saves_host_and_fade_options_separately(self):
+    async def test_onboarding_only_requests_host(self):
         flow = flows.BoseSoundTouchConfigFlow()
         flow.hass = SimpleNamespace()
         schema = (await flow.async_step_user())["data_schema"]
-        values = schema({"host": "192.0.2.1", "enable_volume_fade": True})
+        values = schema({"host": "192.0.2.1"})
+        with self.assertRaises(vol.Invalid):
+            schema({"host": "192.0.2.1", "enable_volume_fade": True})
         with patch.object(flows, "_async_validate_input", AsyncMock(return_value={
             "device_id": "MAC", "name": "Speaker",
         })):
             result = await flow.async_step_user(values)
         self.assertEqual(result["data"], {"host": "192.0.2.1"})
-        self.assertEqual(result["options"], {
-            "enable_volume_fade": True, "volume_fade_duration": 1000,
-        })
+        self.assertNotIn("options", result)
+        self.assertFalse(hasattr(flows, "BoseSoundTouchOptionsFlow"))
 
     async def test_setup_applies_defaults_to_existing_entries(self):
         speaker = Speaker()
@@ -493,6 +493,138 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(coordinator.desired_volume)
         self.assertEqual(speaker.writes, [])
         hass.config_entries.async_forward_entry_setups.assert_awaited_once()
+        self.assertEqual(integration.PLATFORMS, ["media_player", "sensor", "switch", "number"])
+
+
+class DeviceControlTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.entry = SimpleNamespace(
+            unique_id="MAC", entry_id="entry", options={"unrelated": "keep"},
+        )
+        self.listeners = []
+
+        def add_listener(listener):
+            self.listeners.append(listener)
+            return lambda: self.listeners.remove(listener)
+
+        self.entry.add_update_listener = add_listener
+        self.hass = SimpleNamespace()
+        self.coordinator = controller.SoundTouchCoordinator(self.hass, Speaker())
+        self.coordinator.data = state(10)
+
+        def update_entry(entry, *, options):
+            entry.options = options
+            return True
+
+        self.hass.config_entries = SimpleNamespace(async_update_entry=update_entry)
+        self.hass.data = {"bose_soundtouch": {"entry": {"coordinator": self.coordinator}}}
+        self.switch = integration.switch_platform.SoundTouchVolumeFadeSwitch(
+            self.coordinator, self.entry,
+        )
+        self.number = integration.number_platform.SoundTouchVolumeFadeDurationNumber(
+            self.coordinator, self.entry,
+        )
+        self.switch.hass = self.number.hass = self.hass
+
+    async def test_device_identity_defaults_and_availability_without_network(self):
+        self.assertFalse(self.switch.is_on)
+        self.assertEqual(self.number.native_value, 1000)
+        self.assertEqual(self.switch.device_info["identifiers"], {("bose_soundtouch", "MAC")})
+        self.assertEqual(self.switch.device_info, self.number.device_info)
+        self.assertEqual(self.switch._attr_unique_id, "MAC_enable_volume_fade")
+        self.assertEqual(self.number._attr_unique_id, "MAC_volume_fade_duration")
+        self.assertFalse(self.switch._attr_should_poll)
+        self.assertEqual(self.number._attr_native_max_value, 60000)
+        self.assertEqual(self.number._attr_native_step, 1)
+
+    async def test_controls_apply_immediately_and_preserve_other_settings(self):
+        self.coordinator._desired_volume = 20
+        await self.switch.async_turn_on()
+        await self.number.async_set_native_value(3000)
+        self.assertTrue(self.switch.is_on)
+        self.assertEqual(self.number.native_value, 3000)
+        self.assertTrue(self.coordinator._enable_volume_fade)
+        self.assertEqual(self.coordinator._volume_fade_duration, 3000)
+        self.assertEqual(self.coordinator.desired_volume, 20)
+        self.assertEqual(self.entry.options["unrelated"], "keep")
+        await self.switch.async_turn_off()
+        self.assertFalse(self.coordinator._enable_volume_fade)
+        self.assertEqual(self.number.native_value, 3000)
+
+    async def test_persistence_recreation_and_b1_settings(self):
+        self.entry.options = {"enable_volume_fade": True, "volume_fade_duration": 3500}
+        integration._configure_volume(self.coordinator, self.entry)
+        self.assertTrue(self.switch.is_on)
+        self.assertEqual(self.number.native_value, 3500)
+        await self.number.async_set_native_value(5000)
+        replacement = integration.number_platform.SoundTouchVolumeFadeDurationNumber(
+            self.coordinator, self.entry,
+        )
+        self.assertEqual(replacement.native_value, 5000)
+
+    async def test_duration_bounds_and_invalid_values(self):
+        for value in (0, 1, 60000):
+            await self.number.async_set_native_value(value)
+            self.assertEqual(self.number.native_value, value)
+        for value in (-1, 60001, 1.5, float("nan"), float("inf")):
+            with self.subTest(value=value), self.assertRaises(RuntimeError):
+                await self.number.async_set_native_value(value)
+            self.assertEqual(self.number.native_value, 60000)
+
+    async def test_entry_listener_updates_state_and_is_removed_on_unload(self):
+        await self.switch.async_added_to_hass()
+        await self.number.async_added_to_hass()
+        self.assertEqual(len(self.listeners), 2)
+        for listener in list(self.listeners):
+            await listener(self.hass, self.entry)
+        self.assertEqual(self.switch.state_writes, 1)
+        self.assertEqual(self.number.state_writes, 1)
+        for entity in (self.switch, self.number):
+            for remove in entity.removers:
+                remove()
+        self.assertEqual(self.listeners, [])
+
+    async def test_platform_setup_adds_device_controls(self):
+        switch_entities = []
+        number_entities = []
+        await integration.switch_platform.async_setup_entry(
+            self.hass, self.entry, switch_entities.extend,
+        )
+        await integration.number_platform.async_setup_entry(
+            self.hass, self.entry, number_entities.extend,
+        )
+        self.assertEqual(len(switch_entities), 1)
+        self.assertEqual(len(number_entities), 1)
+        self.assertEqual(switch_entities[0].device_info, number_entities[0].device_info)
+
+    async def test_settings_are_isolated_per_speaker(self):
+        other_entry = SimpleNamespace(
+            unique_id="OTHER", entry_id="other", options={},
+        )
+        other_coordinator = controller.SoundTouchCoordinator(self.hass, Speaker())
+        other = integration.switch_platform.SoundTouchVolumeFadeSwitch(
+            other_coordinator, other_entry,
+        )
+        other.hass = self.hass
+        await self.switch.async_turn_on()
+        await self.number.async_set_native_value(4000)
+        self.assertFalse(other.is_on)
+        self.assertFalse(other_coordinator._enable_volume_fade)
+        self.assertEqual(other_entry.options, {})
+        self.assertNotEqual(other._attr_unique_id, self.switch._attr_unique_id)
+
+    async def test_setting_changes_do_not_replace_active_fade(self):
+        task = asyncio.create_task(asyncio.Event().wait())
+        self.coordinator._volume_task = task
+        self.coordinator._desired_volume = 40
+        try:
+            await self.switch.async_turn_on()
+            await self.number.async_set_native_value(2000)
+            self.assertIs(self.coordinator._volume_task, task)
+            self.assertFalse(task.done())
+            self.assertEqual(self.coordinator.desired_volume, 40)
+        finally:
+            await self.coordinator.async_stop_volume()
 
 
 class ClientVolumeTests(unittest.IsolatedAsyncioTestCase):

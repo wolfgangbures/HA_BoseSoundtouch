@@ -3,23 +3,17 @@
     "step": {
       "user": {
         "title": "Add Bose SoundTouch",
-        "description": "Enter your speaker host and optional volume fade settings. Duration is in milliseconds; 0 means immediate.",
+        "description": "Enter the IP address or hostname of your speaker.",
         "data": {
-          "host": "Host",
-          "enable_volume_fade": "Enable volume fade",
-          "volume_fade_duration": "Volume fade duration (ms)"
+          "host": "Host"
         }
       },
-      "options": {
-        "step": {
-          "init": {
-            "title": "Volume fade",
-            "description": "Fade each new HA volume request from the speaker's actual volume. Duration is in milliseconds; 0 means immediate. HA keeps enforcing the last target regardless of this setting.",
-            "data": {
-              "enable_volume_fade": "Enable volume fade",
-              "volume_fade_duration": "Volume fade duration (ms)"
-            }
-          }
+      "entity": {
+        "switch": {
+          "volume_fade": {"name": "Volume fade"}
+        },
+        "number": {
+          "volume_fade_duration": {"name": "Volume fade duration"}
         }
       }
     },
