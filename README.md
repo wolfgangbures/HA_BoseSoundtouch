@@ -41,11 +41,37 @@ Other volume controllers, including physical buttons, can be overridden.
 Targets are held in memory until the next request or entry unload/HA restart;
 no volume is forced before the first HA request.
 
-Open the speaker entry's **Configure** options in **Settings -> Devices & Services**:
+Open the speaker **device page** in **Settings -> Devices & Services**.
+Under Configuration, each device exposes two controls usable in automations:
 
-- **Enable volume fade** (`enable_volume_fade`): defaults to **false**.
-- **Volume fade duration (ms)** (`volume_fade_duration`): defaults to **1000**;
-  a non-negative integer. Zero means immediate, even if fading is enabled.
+- **Volume fade** switch: defaults to **off**.
+- **Volume fade duration** number: defaults to **1000 ms**;
+  range **0-60000 ms**, step **1 ms**. Zero means immediate, even if fading is enabled.
+
+These local device properties persist across HA restarts and can be changed
+even when the speaker is offline. They are no longer Configure/onboarding
+options. Existing `2.0.0b1` settings are retained using the same HA storage;
+legacy durations above 60000 ms remain effective until changed, but new values
+must be within the number entity's range. Settings apply to the next volume
+request; changing them does not restart an active fade.
+
+Example automation sequence (replace entity IDs with those on your device):
+
+```yaml
+- action: switch.turn_on
+  target:
+    entity_id: switch.your_speaker_volume_fade
+- action: number.set_value
+  target:
+    entity_id: number.your_speaker_volume_fade_duration
+  data:
+    value: 3000
+- action: media_player.volume_set
+  target:
+    entity_id: media_player.your_speaker
+  data:
+    volume_level: 0.35
+```
 
 Fades use a fresh actual-volume reading, linear interpolation and integer
 volume steps on a 100 ms cadence, plus a final deadline step. Network latency and the speaker's own response
@@ -66,6 +92,16 @@ Unavailable speakers cannot receive HA service calls that HA itself rejects;
 already accepted targets remain pending during communication outages.
 
 ## Changelog
+
+### 2.0.0b2
+
+- Replace integration fade options with a switch and duration number belonging
+  to each speaker device, controllable through standard HA actions.
+- Persist properties across restarts and preserve beta 1 settings.
+- Duration control supports 0-60000 ms with 1 ms steps.
+- Volume target enforcement and native fade behavior are unchanged.
+
+See [RELEASE_NOTES_2.0.0b2.md](RELEASE_NOTES_2.0.0b2.md).
 
 ### 2.0.0b1
 

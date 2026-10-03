@@ -5,7 +5,9 @@ from __future__ import annotations
 from homeassistant.const import Platform
 
 DOMAIN = "bose_soundtouch"
-PLATFORMS: list[Platform] = [Platform.MEDIA_PLAYER, Platform.SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.MEDIA_PLAYER, Platform.SENSOR, Platform.SWITCH, Platform.NUMBER,
+]
 DEFAULT_PORT = 8090
 DEFAULT_POLL_INTERVAL = 15
 # Number of consecutive poll failures tolerated before the entity goes unavailable.
@@ -16,6 +18,7 @@ CONF_ENABLE_VOLUME_FADE = "enable_volume_fade"
 CONF_VOLUME_FADE_DURATION = "volume_fade_duration"
 DEFAULT_ENABLE_VOLUME_FADE = False
 DEFAULT_VOLUME_FADE_DURATION = 1000
+MAX_VOLUME_FADE_DURATION = 60000
 VOLUME_FADE_STEP_INTERVAL = 0.1
 VOLUME_RETRY_INTERVAL = 1
 DATA_MAC_LOOKUP = "mac_entity_lookup"
