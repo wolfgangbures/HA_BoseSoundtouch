@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, NotRequired, Optional, TypedDict
 import asyncio
 import logging
 import xml.etree.ElementTree as ET
@@ -18,6 +18,14 @@ _LOGGER = logging.getLogger(__name__)
 
 class SoundTouchError(Exception):
     """Raised when the SoundTouch API returns an error."""
+
+
+class SoundTouchVolume(TypedDict):
+    """Validated speaker volume response."""
+
+    actual: int
+    mute: bool
+    target: NotRequired[int]
 
 
 @dataclass(slots=True)
@@ -139,6 +147,11 @@ class SoundTouchClient:
 
         return await self._async_get_info()
 
+    async def async_get_volume(self) -> int:
+        """Read actual volume without polling unrelated endpoints."""
+
+        return (await self._async_get_volume())["actual"]
+
     async def async_set_volume(self, volume: int) -> None:
         _LOGGER.info(
             "Setting volume on %s (%s) to %s",
@@ -241,17 +254,26 @@ class SoundTouchClient:
         self._device_type = device_type
         return {"device_id": device_id, "name": name, "type": device_type}
 
-    async def _async_get_volume(self) -> dict[str, Any]:
+    async def _async_get_volume(self) -> SoundTouchVolume:
         volume = await self._request("get", "/volume")
         if volume is None:
-            return {"actual": 0, "mute": False}
-        actual = int(volume.findtext("actualvolume", default="0"))
+            raise SoundTouchError("Speaker returned an empty volume response")
+        actual_text = volume.findtext("actualvolume")
+        if actual_text is None:
+            raise SoundTouchError("Speaker volume response is missing actualvolume")
         target_text = volume.findtext("targetvolume")
         mute_text = volume.findtext("mute")
         mute = bool(mute_text and mute_text.lower() == "true")
-        data: dict[str, Any] = {"actual": actual, "mute": mute}
-        if target_text is not None:
-            data["target"] = int(target_text)
+        try:
+            actual = int(actual_text)
+            target = int(target_text) if target_text is not None else None
+        except ValueError as err:
+            raise SoundTouchError("Speaker returned a non-integer volume") from err
+        if not 0 <= actual <= 100 or (target is not None and not 0 <= target <= 100):
+            raise SoundTouchError("Speaker returned a volume outside 0-100")
+        data: SoundTouchVolume = {"actual": actual, "mute": mute}
+        if target is not None:
+            data["target"] = target
         return data
 
     async def _async_get_now_playing(self) -> dict[str, Any]:

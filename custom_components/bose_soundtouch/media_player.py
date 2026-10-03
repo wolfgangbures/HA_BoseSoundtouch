@@ -300,6 +300,7 @@ class SoundTouchMediaPlayer(CoordinatorEntity[SoundTouchCoordinator], MediaPlaye
         attributes["soundtouch_grouped"] = role != "standalone"
         attributes["soundtouch_effective_state"] = effective_state.value
         attributes["soundtouch_effective_state_detail"] = effective_state_detail
+        attributes["soundtouch_target_volume"] = self.coordinator.desired_volume
         return attributes
 
     @property
@@ -330,12 +331,7 @@ class SoundTouchMediaPlayer(CoordinatorEntity[SoundTouchCoordinator], MediaPlaye
 
     async def async_set_volume_level(self, volume: float) -> None:
         volume_value = max(0, min(100, round(volume * 100)))
-        self.coordinator.remember_desired_volume(volume_value)
-        await self._async_safe_command(
-            f"set volume to {volume_value}",
-            self.coordinator.client.async_set_volume,
-            volume_value,
-        )
+        await self.coordinator.async_set_volume(volume_value)
 
     async def async_select_source(self, source: str) -> None:
         async def _do_select() -> None:
