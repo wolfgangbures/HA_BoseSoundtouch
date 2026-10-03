@@ -15,7 +15,15 @@ from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .client import SoundTouchClient, SoundTouchError, SoundTouchZoneMember
-from .const import DATA_LAST_SOURCE, DOMAIN, PLATFORMS
+from .const import (
+    CONF_ENABLE_VOLUME_FADE,
+    CONF_VOLUME_FADE_DURATION,
+    DATA_LAST_SOURCE,
+    DEFAULT_ENABLE_VOLUME_FADE,
+    DEFAULT_VOLUME_FADE_DURATION,
+    DOMAIN,
+    PLATFORMS,
+)
 from .utils import same_zone_members, speaker_in_zone
 from .coordinator import SoundTouchCoordinator
 
@@ -47,6 +55,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
     client = SoundTouchClient(session, entry.data["host"])
     coordinator = SoundTouchCoordinator(hass, client)
+    _configure_volume(coordinator, entry)
     await coordinator.async_config_entry_first_refresh()
 
     domain_data[entry.entry_id] = {
@@ -55,6 +64,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_async_update_options))
     return True
 
 
@@ -63,8 +73,20 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
+        await hass.data[DOMAIN][entry.entry_id]["coordinator"].async_stop_volume()
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return unload_ok
+
+
+def _configure_volume(coordinator: SoundTouchCoordinator, entry: ConfigEntry) -> None:
+    coordinator.configure_volume(
+        entry.options.get(CONF_ENABLE_VOLUME_FADE, DEFAULT_ENABLE_VOLUME_FADE),
+        entry.options.get(CONF_VOLUME_FADE_DURATION, DEFAULT_VOLUME_FADE_DURATION),
+    )
+
+
+async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    _configure_volume(hass.data[DOMAIN][entry.entry_id]["coordinator"], entry)
 
 
 def _register_services(hass: HomeAssistant) -> None:
@@ -188,6 +210,7 @@ async def _async_apply_zone_service(hass: HomeAssistant, data: dict, mode: str) 
         [f"{member.mac}@{member.ip}" for member in target_members],
     )
 
+    master_coordinator.remember_desired_zone(target_members)
     await master_client.async_set_zone(target_members)
 
     if mode == "create":

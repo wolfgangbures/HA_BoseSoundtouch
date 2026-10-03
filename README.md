@@ -8,6 +8,7 @@ This integration exposes individual Bose SoundTouch speakers as `media_player` e
 
 - Local HTTP control via the public SoundTouch XML API
 - Power toggle, volume control and source selection
+- Persistent HA volume target correction and optional native volume fading
 - Automatic polling via a `DataUpdateCoordinator`
 - Zone member awareness plus built-in services for creating/joining/leaving zones
 
@@ -30,7 +31,51 @@ This integration exposes individual Bose SoundTouch speakers as `media_player` e
 	Each service expects entity IDs from this integration (`media_player.bose_*`).
 - Every entity exposes attributes with the active IP address, MAC/device ID, and a JSON-style list of current zone members so automations can react to topology changes.
 
+## Volume targets and fading (2.0)
+
+Each accepted `media_player.volume_set` request becomes that speaker's HA target.
+The integration checks **actual** volume, retries unconfirmed writes, and corrects
+later drift on every successful poll (normally every 15 seconds). The target no
+longer expires after ten minutes or requires a network outage to trigger correction.
+Other volume controllers, including physical buttons, can be overridden.
+Targets are held in memory until the next request or entry unload/HA restart;
+no volume is forced before the first HA request.
+
+Open the speaker entry's **Configure** options in **Settings -> Devices & Services**:
+
+- **Enable volume fade** (`enable_volume_fade`): defaults to **false**.
+- **Volume fade duration (ms)** (`volume_fade_duration`): defaults to **1000**;
+  a non-negative integer. Zero means immediate, even if fading is enabled.
+
+Fades use a fresh actual-volume reading, linear interpolation and integer
+volume steps on a 100 ms cadence, plus a final deadline step. Network latency and the speaker's own response
+can extend the requested duration. A newer request cancels the previous fade
+and starts from a new speaker reading; fades do not block HA service calls.
+With fading disabled, the first write and coordinator refresh are awaited as
+before; confirmation/retries continue in the background.
+After a fade, the final target is verified and retried until confirmed.
+Communication failures are logged and retried with backoff up to 15 seconds;
+an interrupted fade resumes with direct target correction after recovery.
+Normal polls do not jump to the final target while a fade is active.
+Options apply to subsequent requests without clearing the target.
+Unloading the entry cancels pending volume work.
+
+The `soundtouch_target_volume` media-player attribute exposes the HA target on
+the 0-100 scale; the volume entity/sensor still reports actual speaker volume.
+Unavailable speakers cannot receive HA service calls that HA itself rejects;
+already accepted targets remain pending during communication outages.
+
 ## Changelog
+
+### 2.0.0b1
+
+- Major-version beta: always reconcile the last accepted HA volume target.
+- Add per-speaker optional native volume fading, latest-request cancellation,
+  actual-volume confirmation, retries and unload cleanup.
+- Reject missing/invalid speaker volume readings instead of treating them as zero.
+- Existing installations retain immediate volume changes by default.
+
+For beta release notes, see [RELEASE_NOTES_2.0.0b1.md](RELEASE_NOTES_2.0.0b1.md).
 
 ### 1.0.10
 
@@ -99,5 +144,3 @@ For stable release notes, see `RELEASE_NOTES_1.0.7.md`.
 - Built for beta validation of Bose cloud-deprecation related source-selection regressions.
 
 For GitHub prerelease notes, see `RELEASE_NOTES_1.0.7b1.md`.
-
-
