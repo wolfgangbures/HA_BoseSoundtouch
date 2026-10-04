@@ -34,7 +34,8 @@ This integration exposes individual Bose SoundTouch speakers as `media_player` e
 ## Volume targets and fading (2.0)
 
 Each accepted `media_player.volume_set` request becomes that speaker's HA target.
-The integration checks **actual** volume, retries unconfirmed writes, and corrects
+With **Persistent volume override** on (the default), the integration checks
+**actual** volume, retries unconfirmed writes, and corrects
 later drift on every successful poll (normally every 15 seconds). The target no
 longer expires after ten minutes or requires a network outage to trigger correction.
 Other volume controllers, including physical buttons, can be overridden.
@@ -42,18 +43,31 @@ Targets are held in memory until the next request or entry unload/HA restart;
 no volume is forced before the first HA request.
 
 Open the speaker **device page** in **Settings -> Devices & Services**.
-Under Configuration, each device exposes two controls usable in automations:
+Under Configuration, each device exposes four controls usable in automations:
 
 - **Volume fade** switch: defaults to **off**.
-- **Volume fade duration** number: defaults to **1000 ms**;
-  range **0-60000 ms**, step **1 ms**. Zero means immediate, even if fading is enabled.
+- **Persistent volume override** switch: defaults to **on**. When off, volume
+  requests still try until the target is reached, but stop on the first volume
+  communication error and do not correct later drift or restore volume after outages.
+- **Volume fade-in duration** number: defaults to **2000 ms**, used when increasing volume.
+- **Volume fade-out duration** number: defaults to **400 ms**, used when decreasing volume.
+  Both durations have range **0-60000 ms**, step **1 ms**. Zero means immediate
+  for that direction, even if fading is enabled.
 
 These local device properties persist across HA restarts and can be changed
 even when the speaker is offline. They are no longer Configure/onboarding
-options. Existing `2.0.0b1` settings are retained using the same HA storage;
+options. Existing beta settings are retained using the same HA storage:
+the original duration value and entity unique ID now belong to fade-in. The
+existing entity ID (typically `number.your_speaker_volume_fade_duration`) stays
+unchanged, even though its display name is now "Volume fade-in duration".
+Fade-out starts at 400 ms. A previously saved fade-in duration is not reset;
 legacy durations above 60000 ms remain effective until changed, but new values
 must be within the number entity's range. Settings apply to the next volume
-request; changing them does not restart an active fade.
+request; changing them does not restart an active fade. The persistence switch
+applies immediately to poll correction and error handling for pending requests.
+Turning it off during an error backoff stops the pending retry when that wait
+ends; a healthy active fade continues. Turning it back on re-enforces the last
+requested target on the next successful poll. No target is invented on startup.
 
 Example automation sequence (replace entity IDs with those on your device):
 
@@ -65,7 +79,12 @@ Example automation sequence (replace entity IDs with those on your device):
   target:
     entity_id: number.your_speaker_volume_fade_duration
   data:
-    value: 3000
+    value: 2000
+- action: number.set_value
+  target:
+    entity_id: number.your_speaker_volume_fade_out_duration
+  data:
+    value: 400
 - action: media_player.volume_set
   target:
     entity_id: media_player.your_speaker
@@ -80,18 +99,30 @@ and starts from a new speaker reading; fades do not block HA service calls.
 With fading disabled, the first write and coordinator refresh are awaited as
 before; confirmation/retries continue in the background.
 After a fade, the final target is verified and retried until confirmed.
-Communication failures are logged and retried with backoff up to 15 seconds;
-an interrupted fade resumes with direct target correction after recovery.
+With persistence on, communication failures are logged and retried with backoff
+up to 15 seconds; an interrupted fade resumes with direct target correction after
+recovery. With persistence off, errors are logged and terminate that request.
 Normal polls do not jump to the final target while a fade is active.
-Options apply to subsequent requests without clearing the target.
+Fade-in/out duration is chosen from a fresh actual-volume reading, not cached
+HA volume, and both timings are captured when each volume request is accepted.
 Unloading the entry cancels pending volume work.
 
 The `soundtouch_target_volume` media-player attribute exposes the HA target on
 the 0-100 scale; the volume entity/sensor still reports actual speaker volume.
 Unavailable speakers cannot receive HA service calls that HA itself rejects;
-already accepted targets remain pending during communication outages.
+with persistence on, already accepted targets remain pending during communication outages.
 
 ## Changelog
+
+### 2.0.0b3
+
+- Add a persistent volume override device switch, default on; off stops on
+  volume errors and leaves later disturbances alone.
+- Rename the existing duration to fade-in and add a separate fade-out duration.
+- Defaults: fade-in 2000 ms, fade-out 400 ms; preserve saved fade-in values and
+  existing entity IDs.
+
+See [RELEASE_NOTES_2.0.0b3.md](RELEASE_NOTES_2.0.0b3.md).
 
 ### 2.0.0b2
 

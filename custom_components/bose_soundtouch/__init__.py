@@ -16,16 +16,13 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .client import SoundTouchClient, SoundTouchError, SoundTouchZoneMember
 from .const import (
-    CONF_ENABLE_VOLUME_FADE,
-    CONF_VOLUME_FADE_DURATION,
     DATA_LAST_SOURCE,
-    DEFAULT_ENABLE_VOLUME_FADE,
-    DEFAULT_VOLUME_FADE_DURATION,
     DOMAIN,
     PLATFORMS,
 )
 from .utils import same_zone_members, speaker_in_zone
 from .coordinator import SoundTouchCoordinator
+from .fade_settings import configure_volume_settings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,10 +76,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 def _configure_volume(coordinator: SoundTouchCoordinator, entry: ConfigEntry) -> None:
-    coordinator.configure_volume(
-        entry.options.get(CONF_ENABLE_VOLUME_FADE, DEFAULT_ENABLE_VOLUME_FADE),
-        entry.options.get(CONF_VOLUME_FADE_DURATION, DEFAULT_VOLUME_FADE_DURATION),
-    )
+    configure_volume_settings(coordinator, entry.options)
 
 
 async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:

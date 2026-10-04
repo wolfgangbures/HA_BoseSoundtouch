@@ -22,7 +22,9 @@ from .client import (
 from .const import (
     DEFAULT_ENABLE_VOLUME_FADE,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_PERSISTENT_VOLUME_OVERRIDE,
     DEFAULT_VOLUME_FADE_DURATION,
+    DEFAULT_VOLUME_FADE_OUT_DURATION,
     DESIRED_STATE_MAX_AGE,
     POLL_FAILURE_TOLERANCE,
     VOLUME_FADE_STEP_INTERVAL,
@@ -52,6 +54,8 @@ class SoundTouchCoordinator(DataUpdateCoordinator[SoundTouchState]):
         self._volume_stopped = False
         self._enable_volume_fade = DEFAULT_ENABLE_VOLUME_FADE
         self._volume_fade_duration = DEFAULT_VOLUME_FADE_DURATION
+        self._volume_fade_out_duration = DEFAULT_VOLUME_FADE_OUT_DURATION
+        self._persistent_volume_override = DEFAULT_PERSISTENT_VOLUME_OVERRIDE
         self._desired_zone: list[SoundTouchZoneMember] | None = None
         self._desired_zone_at = 0.0
 
@@ -61,11 +65,19 @@ class SoundTouchCoordinator(DataUpdateCoordinator[SoundTouchState]):
 
         return self._desired_volume
 
-    def configure_volume(self, enable_fade: bool, duration_ms: int) -> None:
-        """Apply per-speaker options to subsequent volume requests."""
+    def configure_volume(
+        self,
+        enable_fade: bool,
+        duration_ms: int,
+        fade_out_duration_ms: int = DEFAULT_VOLUME_FADE_OUT_DURATION,
+        persistent_override: bool = DEFAULT_PERSISTENT_VOLUME_OVERRIDE,
+    ) -> None:
+        """Update fade timing for new requests and the live correction policy."""
 
         self._enable_volume_fade = enable_fade
         self._volume_fade_duration = duration_ms
+        self._volume_fade_out_duration = fade_out_duration_ms
+        self._persistent_volume_override = persistent_override
 
     async def async_set_volume(self, volume: int) -> None:
         """Replace the target and start a single cancellable volume controller."""
@@ -75,20 +87,28 @@ class SoundTouchCoordinator(DataUpdateCoordinator[SoundTouchState]):
                 raise SoundTouchError("Volume controller has been unloaded")
             await self._async_cancel_volume_task()
             self._desired_volume = max(0, min(100, int(volume)))
-            duration = self._volume_fade_duration / 1000 if self._enable_volume_fade else 0
-            if duration == 0:
+            durations = (
+                (self._volume_fade_duration / 1000, self._volume_fade_out_duration / 1000)
+                if self._enable_volume_fade else (0.0, 0.0)
+            )
+            immediate = durations == (0.0, 0.0)
+            failed = False
+            if immediate:
                 try:
                     await self.client.async_set_volume(self._desired_volume)
                 except (asyncio.TimeoutError, ClientError, OSError, SoundTouchError) as err:
                     _LOGGER.warning(
-                        "Could not set volume on %s to %s; retaining target for retry: %s",
-                        self.client.host, self._desired_volume, err,
+                        "Could not set volume on %s to %s (persistent override=%s): %s",
+                        self.client.host, self._desired_volume,
+                        self._persistent_volume_override, err,
                     )
-            self._volume_task = self.hass.async_create_background_task(
-                self._async_drive_volume(self._desired_volume, duration),
-                f"SoundTouch volume ({self.client.host})",
-            )
-        if duration == 0:
+                    failed = True
+            if not failed or self._persistent_volume_override:
+                self._volume_task = self.hass.async_create_background_task(
+                    self._async_drive_volume(self._desired_volume, durations),
+                    f"SoundTouch volume ({self.client.host})",
+                )
+        if immediate:
             await self.async_request_refresh()
 
     async def _async_cancel_volume_task(self) -> None:
@@ -105,47 +125,65 @@ class SoundTouchCoordinator(DataUpdateCoordinator[SoundTouchState]):
             self._volume_stopped = True
             await self._async_cancel_volume_task()
 
-    async def _async_drive_volume(self, target: int, duration: float) -> None:
-        """Fade once, then retry until actual volume confirms the latest target."""
+    async def _async_drive_volume(
+        self, target: int, durations: tuple[float, float],
+    ) -> None:
+        """Attempt the target; optionally retain it across errors and later drift."""
 
         retry_delay = VOLUME_RETRY_INTERVAL
-        fade_pending = duration > 0
+        fade_pending = True
         while True:
             try:
                 current = await self.client.async_get_volume()
                 if current == target:
                     await self.async_request_refresh()
                     return
-                if fade_pending:
+                duration = durations[0] if target > current else durations[1]
+                if fade_pending and duration > 0:
                     # A failed fade resumes with target correction, not another full fade.
                     fade_pending = False
                     await self._async_fade_volume(current, target, duration)
                 else:
+                    fade_pending = False
                     await self.client.async_set_volume(target)
                 retry_delay = VOLUME_RETRY_INTERVAL
             except (asyncio.TimeoutError, ClientError, OSError, SoundTouchError) as err:
+                if not self._persistent_volume_override:
+                    _LOGGER.warning(
+                        "Volume request %s on %s stopped after an error; "
+                        "persistent override is disabled: %s",
+                        target, self.client.host, err,
+                    )
+                    return
                 _LOGGER.warning(
                     "Volume target %s not confirmed on %s; retrying in %ss: %s",
                     target, self.client.host, retry_delay, err,
                 )
                 await asyncio.sleep(retry_delay)
+                if not self._persistent_volume_override:
+                    _LOGGER.info(
+                        "Stopping pending volume retry on %s because persistent override was disabled",
+                        self.client.host,
+                    )
+                    return
                 retry_delay = min(retry_delay * 2, DEFAULT_POLL_INTERVAL)
                 continue
             await asyncio.sleep(VOLUME_RETRY_INTERVAL)
 
     async def _async_fade_volume(self, start: int, target: int, duration: float) -> None:
         started = monotonic()
+        deadline = started + duration
         last_sent = start
         while True:
-            elapsed = monotonic() - started
-            progress = min(elapsed / duration, 1)
+            now = monotonic()
+            progress = 1.0 if now >= deadline else (now - started) / duration
             volume = round(start + (target - start) * progress)
             if volume != last_sent:
                 await self.client.async_set_volume(volume)
                 last_sent = volume
             if progress >= 1:
                 return
-            await asyncio.sleep(min(VOLUME_FADE_STEP_INTERVAL, duration - elapsed))
+            await asyncio.sleep(min(VOLUME_FADE_STEP_INTERVAL, deadline - now))
 
     def remember_desired_zone(self, members: list[SoundTouchZoneMember]) -> None:
         """Remember the zone topology this speaker should be mastering."""
@@ -176,6 +214,7 @@ class SoundTouchCoordinator(DataUpdateCoordinator[SoundTouchState]):
         async with self._volume_lock:
             if (
                 self._volume_stopped
+                or not self._persistent_volume_override
                 or self._desired_volume is None
                 or state.volume == self._desired_volume
                 or (self._volume_task is not None and not self._volume_task.done())
