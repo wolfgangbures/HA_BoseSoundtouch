@@ -7,18 +7,20 @@
         "data": {
           "host": "Host"
         }
-      },
-      "entity": {
-        "switch": {
-          "volume_fade": {"name": "Volume fade"}
-        },
-        "number": {
-          "volume_fade_duration": {"name": "Volume fade duration"}
-        }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to the speaker. Double-check the host and try again."
+    }
+  },
+  "entity": {
+    "switch": {
+      "volume_fade": {"name": "Volume fade"},
+      "persistent_volume_override": {"name": "Persistent volume override"}
+    },
+    "number": {
+      "volume_fade_duration": {"name": "Volume fade-in duration"},
+      "volume_fade_out_duration": {"name": "Volume fade-out duration"}
     }
   }
 }

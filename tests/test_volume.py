@@ -245,8 +245,10 @@ class VolumeTests(unittest.IsolatedAsyncioTestCase):
 
     async def finish(self):
         for _ in range(200):
-            if self.coordinator._volume_task.done():
-                await self.coordinator._volume_task
+            task = self.coordinator._volume_task
+            if task is None or task.done():
+                if task is not None:
+                    await task
                 return
             await REAL_SLEEP(0)
         self.fail("Volume controller did not converge")
@@ -311,7 +313,7 @@ class VolumeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.coordinator.data.volume, 20)
         await self.finish()
         self.assertEqual(self.speaker.writes, [20])
-        self.coordinator.configure_volume(True, 0)
+        self.coordinator.configure_volume(True, 0, 0)
         await self.coordinator.async_set_volume(0)
         self.assertEqual(self.speaker.writes, [20, 0])
         await self.finish()
@@ -328,7 +330,7 @@ class VolumeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_downward_fade_ends_at_zero(self):
         self.speaker.volume = 10
-        self.coordinator.configure_volume(True, 1000)
+        self.coordinator.configure_volume(True, 1000, 1000)
         await self.coordinator.async_set_volume(0)
         await self.finish()
         self.assertEqual(self.speaker.writes, list(range(9, -1, -1)))
@@ -456,6 +458,196 @@ class VolumeTests(unittest.IsolatedAsyncioTestCase):
         await self.finish()
         self.assertEqual(self.speaker.volume, 0)
 
+    async def test_fade_direction_uses_fresh_volume_and_distinct_durations(self):
+        self.coordinator.configure_volume(True, 2000, 400)
+        self.coordinator.data = state(99)
+        await self.coordinator.async_set_volume(30)
+        await self.finish()
+        self.assertEqual(self.speaker.writes, list(range(11, 31)))
+        self.assertAlmostEqual(self.clock.now, 3.0)
+        self.coordinator.data = state(0)
+        started = self.clock.now
+        self.speaker.writes.clear()
+        await self.coordinator.async_set_volume(10)
+        await self.finish()
+        self.assertEqual(self.speaker.writes, [25, 20, 15, 10])
+        self.assertAlmostEqual(self.clock.now - started, 1.4)
+
+    async def test_zero_directional_duration_only_disables_that_direction(self):
+        self.coordinator.configure_volume(True, 0, 400)
+        await self.coordinator.async_set_volume(20)
+        await self.finish()
+        self.assertEqual(self.speaker.writes, [20])
+        started = self.clock.now
+        self.speaker.writes.clear()
+        await self.coordinator.async_set_volume(0)
+        await self.finish()
+        self.assertEqual(self.speaker.writes, [15, 10, 5, 0])
+        self.assertAlmostEqual(self.clock.now - started, 1.4)
+        self.coordinator.configure_volume(True, 2000, 0)
+        self.speaker.volume = 20
+        self.speaker.writes.clear()
+        await self.coordinator.async_set_volume(0)
+        await self.finish()
+        self.assertEqual(self.speaker.writes, [0])
+
+    async def test_equal_target_needs_no_fade(self):
+        self.coordinator.configure_volume(True, 2000, 400)
+        await self.coordinator.async_set_volume(10)
+        await self.finish()
+        self.assertEqual(self.speaker.writes, [])
+        self.assertEqual(self.clock.delays, [])
+
+    async def test_nonpersistent_success_does_not_correct_later_drift(self):
+        self.coordinator.configure_volume(False, 2000, 400, False)
+        await self.coordinator.async_set_volume(25)
+        await self.finish()
+        self.speaker.volume = 5
+        result = await self.coordinator._async_update_data()
+        self.assertEqual(result.volume, 5)
+        self.assertEqual(self.speaker.writes, [25])
+        self.assertEqual(self.coordinator.desired_volume, 25)
+
+    async def test_nonpersistent_ignored_writes_are_attempted_until_reached(self):
+        self.coordinator.configure_volume(False, 2000, 400, False)
+        self.speaker.ignored = 3
+        await self.coordinator.async_set_volume(25)
+        await self.finish()
+        self.assertEqual(self.speaker.writes, [25] * 4)
+        self.speaker.volume = 5
+        await self.coordinator._async_update_data()
+        self.assertEqual(self.speaker.volume, 5)
+
+    async def test_nonpersistent_fade_completes_without_enforcing_later_drift(self):
+        self.coordinator.configure_volume(True, 2000, 400, False)
+        await self.coordinator.async_set_volume(30)
+        await self.finish()
+        self.assertEqual(self.speaker.writes, list(range(11, 31)))
+        self.assertAlmostEqual(self.clock.now, 3.0)
+        self.speaker.volume = 5
+        await self.coordinator._async_update_data()
+        self.assertEqual(self.speaker.volume, 5)
+        self.assertEqual(len(self.speaker.writes), 20)
+
+    async def test_nonpersistent_all_supported_transport_errors_stop_request(self):
+        self.coordinator.configure_volume(True, 2000, 400, False)
+        for error in (
+            asyncio.TimeoutError("timeout"),
+            controller.ClientError("connection failed"),
+            OSError("network down"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                with patch.object(self.speaker, "async_get_volume", AsyncMock(side_effect=error)) as read:
+                    with self.assertLogs(controller.__name__, level="WARNING"):
+                        await self.coordinator.async_set_volume(30)
+                        await self.finish()
+                    self.assertEqual(read.await_count, 1)
+        self.assertEqual(self.speaker.writes, [])
+
+    async def test_nonpersistent_retry_write_error_stops_after_ignored_initial_write(self):
+        self.coordinator.configure_volume(False, 2000, 400, False)
+        self.speaker.ignored = 1
+        write = self.speaker.async_set_volume
+
+        async def fail_second_write(volume):
+            if self.speaker.writes:
+                self.speaker.write_failures = 1
+            await write(volume)
+
+        with patch.object(self.speaker, "async_set_volume", fail_second_write):
+            with self.assertLogs(controller.__name__, level="WARNING"):
+                await self.coordinator.async_set_volume(30)
+                await self.finish()
+        await self.coordinator._async_update_data()
+        self.assertEqual(self.speaker.writes, [30, 30])
+        self.assertEqual(self.speaker.volume, 10)
+
+    async def test_nonpersistent_initial_write_error_stops_without_retry(self):
+        self.coordinator.configure_volume(False, 2000, 400, False)
+        self.speaker.write_failures = 1
+        with self.assertLogs(controller.__name__, level="WARNING"):
+            await self.coordinator.async_set_volume(30)
+            await self.finish()
+        self.assertIsNone(self.coordinator._volume_task)
+        await self.coordinator._async_update_data()
+        self.assertEqual(self.speaker.writes, [30])
+        self.assertEqual(self.speaker.reads, 0)
+        await self.coordinator.async_set_volume(40)
+        await self.finish()
+        self.assertEqual(self.speaker.volume, 40)
+
+    async def test_nonpersistent_volume_read_error_stops_without_retry(self):
+        self.coordinator.configure_volume(True, 2000, 400, False)
+        self.speaker.read_failures = 1
+        with self.assertLogs(controller.__name__, level="WARNING"):
+            await self.coordinator.async_set_volume(30)
+            await self.finish()
+        await self.coordinator._async_update_data()
+        self.assertEqual(self.speaker.reads, 1)
+        self.assertEqual(self.speaker.writes, [])
+
+    async def test_nonpersistent_fade_write_error_stops_without_final_target(self):
+        self.coordinator.configure_volume(True, 1000, 400, False)
+        self.speaker.write_failures = 1
+        with self.assertLogs(controller.__name__, level="WARNING"):
+            await self.coordinator.async_set_volume(20)
+            await self.finish()
+        await self.coordinator._async_update_data()
+        self.assertEqual(self.speaker.writes, [11])
+
+    async def test_nonpersistent_verification_error_stops_without_retry(self):
+        self.coordinator.configure_volume(False, 2000, 400, False)
+        self.speaker.read_failures = 1
+        with self.assertLogs(controller.__name__, level="WARNING"):
+            await self.coordinator.async_set_volume(30)
+            await self.finish()
+        self.speaker.volume = 5
+        await self.coordinator._async_update_data()
+        self.assertEqual(self.speaker.writes, [30])
+
+    async def test_disabling_override_during_error_backoff_stops_retry(self):
+        self.coordinator.configure_volume(True, 2000, 400, True)
+        self.speaker.read_failures = 1
+        with self.assertLogs(controller.__name__, level="WARNING"):
+            await self.coordinator.async_set_volume(30)
+            await REAL_SLEEP(0)
+            self.coordinator.configure_volume(True, 2000, 400, False)
+            await self.finish()
+        self.assertEqual(self.speaker.reads, 1)
+        self.assertEqual(self.speaker.writes, [])
+
+    async def test_reenabling_override_corrects_last_target_on_next_poll(self):
+        self.coordinator.configure_volume(False, 2000, 400, False)
+        await self.coordinator.async_set_volume(30)
+        await self.finish()
+        self.speaker.volume = 5
+        await self.coordinator._async_update_data()
+        self.assertEqual(self.speaker.volume, 5)
+        self.coordinator.configure_volume(False, 2000, 400, True)
+        await self.coordinator._async_update_data()
+        self.assertEqual(self.speaker.volume, 30)
+
+    async def test_disabled_override_does_not_restore_volume_after_poll_recovery(self):
+        self.coordinator.configure_volume(False, 2000, 400, False)
+        await self.coordinator.async_set_volume(30)
+        await self.finish()
+        self.speaker.poll_failures = 1
+        with self.assertLogs(controller.__name__, level="WARNING"):
+            await self.coordinator._async_update_data()
+        self.speaker.volume = 5
+        await self.coordinator._async_update_data()
+        self.assertEqual(self.speaker.writes, [30])
+        self.assertEqual(self.speaker.volume, 5)
+
+    async def test_duration_setting_changes_dont_change_running_fade(self):
+        self.coordinator.configure_volume(True, 2000, 400)
+        await self.coordinator.async_set_volume(30)
+        await REAL_SLEEP(0)
+        self.coordinator.configure_volume(True, 100, 100)
+        await self.finish()
+        self.assertEqual(self.speaker.writes, list(range(11, 31)))
+        self.assertAlmostEqual(self.clock.now, 3.0)
+
 
 class FlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_onboarding_only_requests_host(self):
@@ -489,7 +681,9 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await integration.async_setup_entry(hass, entry))
         coordinator = hass.data["bose_soundtouch"]["entry"]["coordinator"]
         self.assertFalse(coordinator._enable_volume_fade)
-        self.assertEqual(coordinator._volume_fade_duration, 1000)
+        self.assertEqual(coordinator._volume_fade_duration, 2000)
+        self.assertEqual(coordinator._volume_fade_out_duration, 400)
+        self.assertTrue(coordinator._persistent_volume_override)
         self.assertIsNone(coordinator.desired_volume)
         self.assertEqual(speaker.writes, [])
         hass.config_entries.async_forward_entry_setups.assert_awaited_once()
@@ -524,38 +718,63 @@ class DeviceControlTests(unittest.IsolatedAsyncioTestCase):
         self.number = integration.number_platform.SoundTouchVolumeFadeDurationNumber(
             self.coordinator, self.entry,
         )
-        self.switch.hass = self.number.hass = self.hass
+        self.fade_out = integration.number_platform.SoundTouchVolumeFadeOutDurationNumber(
+            self.coordinator, self.entry,
+        )
+        self.override = integration.switch_platform.SoundTouchPersistentVolumeOverrideSwitch(
+            self.coordinator, self.entry,
+        )
+        self.entities = (self.switch, self.number, self.fade_out, self.override)
+        for entity in self.entities:
+            entity.hass = self.hass
 
     async def test_device_identity_defaults_and_availability_without_network(self):
         self.assertFalse(self.switch.is_on)
-        self.assertEqual(self.number.native_value, 1000)
+        self.assertEqual(self.number.native_value, 2000)
+        self.assertEqual(self.fade_out.native_value, 400)
+        self.assertTrue(self.override.is_on)
         self.assertEqual(self.switch.device_info["identifiers"], {("bose_soundtouch", "MAC")})
         self.assertEqual(self.switch.device_info, self.number.device_info)
         self.assertEqual(self.switch._attr_unique_id, "MAC_enable_volume_fade")
         self.assertEqual(self.number._attr_unique_id, "MAC_volume_fade_duration")
+        self.assertEqual(self.fade_out._attr_unique_id, "MAC_volume_fade_out_duration")
+        self.assertEqual(self.override._attr_unique_id, "MAC_persistent_volume_override")
         self.assertFalse(self.switch._attr_should_poll)
         self.assertEqual(self.number._attr_native_max_value, 60000)
         self.assertEqual(self.number._attr_native_step, 1)
+        for entity in self.entities:
+            self.assertEqual(entity.device_info, self.switch.device_info)
 
     async def test_controls_apply_immediately_and_preserve_other_settings(self):
         self.coordinator._desired_volume = 20
         await self.switch.async_turn_on()
         await self.number.async_set_native_value(3000)
+        await self.fade_out.async_set_native_value(500)
+        await self.override.async_turn_off()
         self.assertTrue(self.switch.is_on)
         self.assertEqual(self.number.native_value, 3000)
         self.assertTrue(self.coordinator._enable_volume_fade)
         self.assertEqual(self.coordinator._volume_fade_duration, 3000)
+        self.assertEqual(self.coordinator._volume_fade_out_duration, 500)
+        self.assertFalse(self.coordinator._persistent_volume_override)
         self.assertEqual(self.coordinator.desired_volume, 20)
         self.assertEqual(self.entry.options["unrelated"], "keep")
         await self.switch.async_turn_off()
         self.assertFalse(self.coordinator._enable_volume_fade)
         self.assertEqual(self.number.native_value, 3000)
+        await self.override.async_turn_on()
+        self.assertTrue(self.coordinator._persistent_volume_override)
+        self.assertEqual(self.coordinator._volume_fade_duration, 3000)
+        self.assertEqual(self.coordinator._volume_fade_out_duration, 500)
 
     async def test_persistence_recreation_and_b1_settings(self):
         self.entry.options = {"enable_volume_fade": True, "volume_fade_duration": 3500}
         integration._configure_volume(self.coordinator, self.entry)
         self.assertTrue(self.switch.is_on)
         self.assertEqual(self.number.native_value, 3500)
+        self.assertEqual(self.fade_out.native_value, 400)
+        self.assertEqual(self.coordinator._volume_fade_duration, 3500)
+        self.assertEqual(self.coordinator._volume_fade_out_duration, 400)
         await self.number.async_set_native_value(5000)
         replacement = integration.number_platform.SoundTouchVolumeFadeDurationNumber(
             self.coordinator, self.entry,
@@ -563,23 +782,23 @@ class DeviceControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replacement.native_value, 5000)
 
     async def test_duration_bounds_and_invalid_values(self):
-        for value in (0, 1, 60000):
-            await self.number.async_set_native_value(value)
-            self.assertEqual(self.number.native_value, value)
-        for value in (-1, 60001, 1.5, float("nan"), float("inf")):
-            with self.subTest(value=value), self.assertRaises(RuntimeError):
-                await self.number.async_set_native_value(value)
-            self.assertEqual(self.number.native_value, 60000)
+        for entity in (self.number, self.fade_out):
+            for value in (0, 1, 60000):
+                await entity.async_set_native_value(value)
+                self.assertEqual(entity.native_value, value)
+            for value in (-1, 60001, 1.5, float("nan"), float("inf")):
+                with self.subTest(entity=entity, value=value), self.assertRaises(RuntimeError):
+                    await entity.async_set_native_value(value)
+                self.assertEqual(entity.native_value, 60000)
 
     async def test_entry_listener_updates_state_and_is_removed_on_unload(self):
-        await self.switch.async_added_to_hass()
-        await self.number.async_added_to_hass()
-        self.assertEqual(len(self.listeners), 2)
+        for entity in self.entities:
+            await entity.async_added_to_hass()
+        self.assertEqual(len(self.listeners), 4)
         for listener in list(self.listeners):
             await listener(self.hass, self.entry)
-        self.assertEqual(self.switch.state_writes, 1)
-        self.assertEqual(self.number.state_writes, 1)
-        for entity in (self.switch, self.number):
+        for entity in self.entities:
+            self.assertEqual(entity.state_writes, 1)
             for remove in entity.removers:
                 remove()
         self.assertEqual(self.listeners, [])
@@ -593,9 +812,28 @@ class DeviceControlTests(unittest.IsolatedAsyncioTestCase):
         await integration.number_platform.async_setup_entry(
             self.hass, self.entry, number_entities.extend,
         )
-        self.assertEqual(len(switch_entities), 1)
-        self.assertEqual(len(number_entities), 1)
+        self.assertEqual(len(switch_entities), 2)
+        self.assertEqual(len(number_entities), 2)
         self.assertEqual(switch_entities[0].device_info, number_entities[0].device_info)
+
+    async def test_saved_new_settings_survive_recreation(self):
+        await self.override.async_turn_off()
+        await self.fade_out.async_set_native_value(700)
+        replacement = controller.SoundTouchCoordinator(self.hass, Speaker())
+        integration._configure_volume(replacement, self.entry)
+        self.assertFalse(replacement._persistent_volume_override)
+        self.assertEqual(replacement._volume_fade_out_duration, 700)
+        self.assertEqual(replacement._volume_fade_duration, 2000)
+
+    async def test_saved_legacy_duration_above_control_limit_is_not_reset(self):
+        self.entry.options = {"volume_fade_duration": 90000}
+        integration._configure_volume(self.coordinator, self.entry)
+        self.assertEqual(self.number.native_value, 90000)
+        self.assertEqual(self.coordinator._volume_fade_duration, 90000)
+        self.assertEqual(self.fade_out.native_value, 400)
+        await self.override.async_turn_off()
+        self.assertEqual(self.number.native_value, 90000)
+        self.assertEqual(self.coordinator._volume_fade_duration, 90000)
 
     async def test_settings_are_isolated_per_speaker(self):
         other_entry = SimpleNamespace(

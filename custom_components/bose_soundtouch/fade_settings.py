@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -11,11 +12,28 @@ from homeassistant.helpers.entity import Entity, EntityCategory
 from .const import (
     CONF_ENABLE_VOLUME_FADE,
     CONF_VOLUME_FADE_DURATION,
+    CONF_VOLUME_FADE_OUT_DURATION,
+    CONF_PERSISTENT_VOLUME_OVERRIDE,
     DEFAULT_ENABLE_VOLUME_FADE,
+    DEFAULT_PERSISTENT_VOLUME_OVERRIDE,
     DEFAULT_VOLUME_FADE_DURATION,
+    DEFAULT_VOLUME_FADE_OUT_DURATION,
     DOMAIN,
 )
 from .coordinator import SoundTouchCoordinator
+
+
+def configure_volume_settings(
+    coordinator: SoundTouchCoordinator, options: Mapping[str, Any],
+) -> None:
+    """Apply the same saved settings during setup, updates and device actions."""
+
+    coordinator.configure_volume(
+        options.get(CONF_ENABLE_VOLUME_FADE, DEFAULT_ENABLE_VOLUME_FADE),
+        options.get(CONF_VOLUME_FADE_DURATION, DEFAULT_VOLUME_FADE_DURATION),
+        options.get(CONF_VOLUME_FADE_OUT_DURATION, DEFAULT_VOLUME_FADE_OUT_DURATION),
+        options.get(CONF_PERSISTENT_VOLUME_OVERRIDE, DEFAULT_PERSISTENT_VOLUME_OVERRIDE),
+    )
 
 
 class SoundTouchFadeSetting(Entity):
@@ -62,8 +80,5 @@ class SoundTouchFadeSetting(Entity):
         options = {**self._entry.options, key: value}
         self.hass.config_entries.async_update_entry(self._entry, options=options)
         # Apply synchronously so the next action in an automation sees the new value.
-        self.coordinator.configure_volume(
-            options.get(CONF_ENABLE_VOLUME_FADE, DEFAULT_ENABLE_VOLUME_FADE),
-            options.get(CONF_VOLUME_FADE_DURATION, DEFAULT_VOLUME_FADE_DURATION),
-        )
+        configure_volume_settings(self.coordinator, options)
         self.async_write_ha_state()
