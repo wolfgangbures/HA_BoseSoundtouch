@@ -114,6 +114,16 @@ with persistence on, already accepted targets remain pending during communicatio
 
 ## Changelog
 
+### 2.0.0
+
+- Promote the validated `2.0.0b3` behavior to stable without functional changes.
+- Reliable volume target confirmation and optional persistent drift correction.
+- Per-speaker device controls for fade enable, persistent override, fade-in
+  duration (default 2000 ms) and fade-out duration (default 400 ms).
+- Preserve saved settings and existing fade-in entity IDs.
+
+See [RELEASE_NOTES_2.0.0.md](RELEASE_NOTES_2.0.0.md).
+
 ### 2.0.0b3
 
 - Add a persistent volume override device switch, default on; off stops on
